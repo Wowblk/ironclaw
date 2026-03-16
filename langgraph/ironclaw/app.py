@@ -33,6 +33,7 @@ from ironclaw.tools.builtin import (
 )
 from ironclaw.channels.channel import OutgoingResponse
 from ironclaw.channels.repl import ReplChannel
+from ironclaw.channels.web import WebGateway
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,8 @@ class IronclawApp:
     Usage::
 
         app = IronclawApp(config)
-        await app.run()
+        await app.run()           # interactive REPL
+        await app.run_web()       # FastAPI web gateway on WEB_PORT
     """
 
     def __init__(self, config: Config | None = None) -> None:
@@ -193,3 +195,37 @@ class IronclawApp:
     async def run(self) -> None:
         """Start the application.  Default mode: interactive REPL."""
         await _run_repl(self.graph, self.tool_registry, self.config)
+
+    async def run_web(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        cors_origins: list[str] | None = None,
+    ) -> None:
+        """Start the FastAPI web gateway (browser UI + SSE).
+
+        Falls back to ``config.channels`` values when arguments are omitted.
+        """
+        import uvicorn
+
+        web_cfg = self.config.channels
+        resolved_host = host or web_cfg.web_host
+        resolved_port = port or web_cfg.web_port
+        resolved_cors = cors_origins or web_cfg.web_cors_origins
+
+        gateway = WebGateway(
+            graph=self.graph,
+            tool_registry=self.tool_registry,
+            cors_origins=resolved_cors,
+        )
+
+        logger.info(
+            "Starting web gateway on http://%s:%d", resolved_host, resolved_port
+        )
+        cfg = uvicorn.Config(
+            gateway.app,
+            host=resolved_host,
+            port=resolved_port,
+            log_level="info",
+        )
+        await uvicorn.Server(cfg).serve()

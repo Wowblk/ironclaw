@@ -78,6 +78,12 @@ class ChannelConfig(BaseSettings):
     http_port: int = Field(default=8080, alias="HTTP_PORT")
     http_secret: str | None = Field(default=None, alias="HTTP_SECRET")
 
+    # Web gateway (browser UI + SSE streaming)
+    web_enabled: bool = Field(default=False, alias="WEB_ENABLED")
+    web_host: str = Field(default="0.0.0.0", alias="WEB_HOST")
+    web_port: int = Field(default=8000, alias="WEB_PORT")
+    web_cors_origins: list[str] = Field(default=["*"], alias="WEB_CORS_ORIGINS")
+
 
 class Config(BaseSettings):
     """Root configuration — composes all subsystem configs."""

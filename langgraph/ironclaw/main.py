@@ -64,6 +64,35 @@ def version():
 
 
 @app.command()
+def serve(
+    host: str = typer.Option(None, "--host", "-H", help="Bind host (default: WEB_HOST or 0.0.0.0)"),
+    port: int = typer.Option(None, "--port", "-p", help="Bind port (default: WEB_PORT or 8000)"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the web gateway (browser UI + SSE streaming)."""
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = IronclawApp(config)
+
+    try:
+        asyncio.run(
+            application.run_web(
+                host=host or None,
+                port=port or None,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
 def config_show():
     """Show the current configuration."""
     cfg = Config.load()
