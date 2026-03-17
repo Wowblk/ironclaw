@@ -93,6 +93,65 @@ def serve(
 
 
 @app.command()
+def telegram(
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the Telegram bot (long-polling mode).
+
+    Requires TELEGRAM_BOT_TOKEN.  Optionally set TELEGRAM_OWNER_ID to
+    restrict the bot to a single Telegram user.
+
+    Install dependency: pip install "ironclaw[telegram]"
+    """
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = IronclawApp(config)
+
+    try:
+        asyncio.run(application.run_telegram())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Telegram bot stopped.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
+def slack(
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the Slack Events API webhook server.
+
+    Requires SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET.
+    Binds to SLACK_WEBHOOK_HOST:SLACK_WEBHOOK_PORT (default 0.0.0.0:3000).
+
+    Point your Slack app Event Subscriptions URL to:
+      https://<your-host>:3000/slack/events
+
+    Install dependency: pip install "ironclaw[slack]"
+    """
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = IronclawApp(config)
+
+    try:
+        asyncio.run(application.run_slack())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Slack gateway stopped.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
 def config_show():
     """Show the current configuration."""
     cfg = Config.load()

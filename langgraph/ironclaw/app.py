@@ -34,6 +34,8 @@ from ironclaw.tools.builtin import (
 from ironclaw.channels.channel import OutgoingResponse
 from ironclaw.channels.repl import ReplChannel
 from ironclaw.channels.web import WebGateway
+from ironclaw.channels.telegram import TelegramAdapter
+from ironclaw.channels.slack import SlackAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -229,3 +231,59 @@ class IronclawApp:
             log_level="info",
         )
         await uvicorn.Server(cfg).serve()
+
+    async def run_telegram(self) -> None:
+        """Start the Telegram bot in long-polling mode.
+
+        Requires ``TELEGRAM_BOT_TOKEN`` to be set.  Optionally restrict to a
+        single user with ``TELEGRAM_OWNER_ID``.
+        """
+        cfg = self.config.telegram
+        if not cfg.bot_token:
+            raise ValueError(
+                "TELEGRAM_BOT_TOKEN is not set.\n"
+                "Get a token from @BotFather and set it in your .env file."
+            )
+        adapter = TelegramAdapter(
+            graph=self.graph,
+            tool_registry=self.tool_registry,
+            bot_token=cfg.bot_token,
+            owner_id=cfg.owner_id,
+        )
+        await adapter.start_polling()
+
+    async def run_slack(self) -> None:
+        """Start the Slack Events API webhook server.
+
+        Requires ``SLACK_BOT_TOKEN`` and ``SLACK_SIGNING_SECRET``.
+        Binds to ``SLACK_WEBHOOK_HOST:SLACK_WEBHOOK_PORT`` (default 0.0.0.0:3000).
+
+        Configure your Slack app's Event Subscriptions Request URL to point to
+        ``https://<public-host>:<port>/slack/events``.
+        """
+        import uvicorn
+
+        cfg = self.config.slack
+        if not cfg.bot_token or not cfg.signing_secret:
+            raise ValueError(
+                "SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET must both be set.\n"
+                "Find them in your Slack app settings at https://api.slack.com/apps"
+            )
+        adapter = SlackAdapter(
+            graph=self.graph,
+            tool_registry=self.tool_registry,
+            bot_token=cfg.bot_token,
+            signing_secret=cfg.signing_secret,
+        )
+        logger.info(
+            "Starting Slack gateway on http://%s:%d/slack/events",
+            cfg.webhook_host,
+            cfg.webhook_port,
+        )
+        server_cfg = uvicorn.Config(
+            adapter.asgi_app,
+            host=cfg.webhook_host,
+            port=cfg.webhook_port,
+            log_level="info",
+        )
+        await uvicorn.Server(server_cfg).serve()

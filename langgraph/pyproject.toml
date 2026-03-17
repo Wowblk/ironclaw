@@ -25,6 +25,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+telegram = [
+    "python-telegram-bot[asyncio]>=21",
+]
+slack = [
+    "slack-bolt>=1.21",
+]
+all-channels = [
+    "python-telegram-bot[asyncio]>=21",
+    "slack-bolt>=1.21",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

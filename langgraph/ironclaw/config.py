@@ -68,6 +68,26 @@ class DatabaseConfig(BaseSettings):
     url: str | None = None
 
 
+class TelegramConfig(BaseSettings):
+    """Telegram bot configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
+    owner_id: int | None = Field(default=None, alias="TELEGRAM_OWNER_ID")
+
+
+class SlackConfig(BaseSettings):
+    """Slack Events API configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    bot_token: str | None = Field(default=None, alias="SLACK_BOT_TOKEN")
+    signing_secret: str | None = Field(default=None, alias="SLACK_SIGNING_SECRET")
+    webhook_host: str = Field(default="0.0.0.0", alias="SLACK_WEBHOOK_HOST")
+    webhook_port: int = Field(default=3000, alias="SLACK_WEBHOOK_PORT")
+
+
 class ChannelConfig(BaseSettings):
     """Channel enablement flags."""
 
@@ -99,6 +119,8 @@ class Config(BaseSettings):
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     channels: ChannelConfig = Field(default_factory=ChannelConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    slack: SlackConfig = Field(default_factory=SlackConfig)
 
     @classmethod
     def load(cls) -> "Config":
