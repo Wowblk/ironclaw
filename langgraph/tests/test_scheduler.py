@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ironclaw.scheduler.scheduler import JobScheduler, JobState
+from titanclaw.scheduler.scheduler import JobScheduler, JobState
 
 
 class _ImmediateGraph:

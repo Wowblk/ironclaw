@@ -10,14 +10,14 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from ironclaw.memory.workspace import Workspace
-from ironclaw.nodes.compaction import (
+from titanclaw.memory.workspace import Workspace
+from titanclaw.nodes.compaction import (
     CompactionResult,
     ContextCompactor,
     _extract_turns,
     _format_turns_for_storage,
 )
-from ironclaw.nodes.context_monitor import (
+from titanclaw.nodes.context_monitor import (
     ContextBreakdown,
     ContextMonitor,
     MoveToWorkspaceStrategy,

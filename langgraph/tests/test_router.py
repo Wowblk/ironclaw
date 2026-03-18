@@ -1,7 +1,7 @@
 """Tests for the submission parser — mirrors Rust router/submission tests."""
 
 import pytest
-from ironclaw.nodes.router import SubmissionKind, parse_submission
+from titanclaw.nodes.router import SubmissionKind, parse_submission
 
 
 def test_undo():

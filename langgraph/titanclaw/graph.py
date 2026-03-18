@@ -1,0 +1,241 @@
+"""
+TitanClaw LangGraph agent graph.
+
+Maps the Rust ``run_agentic_loop`` + ``Agent::run`` into a LangGraph
+``StateGraph``.  The three execution modes from the Rust implementation
+(chat, job, container) collapse into a single, configurable graph here —
+mode-specific behaviour is expressed through ``AgentDeps`` rather than
+separate ``LoopDelegate`` implementations.
+
+Graph topology
+--------------
+
+                ┌──────────────┐
+   START ──────►│ route_input  │
+                └──────┬───────┘
+                       │ signal==stop → END
+                       ▼
+                ┌──────────────┐
+           ┌───►│check_signals │
+           │    └──────┬───────┘
+           │           │ stop → END
+           │           ▼
+           │    ┌──────────────┐   ← NEW: auto-triggered before every LLM call
+           │    │compact_ctx   │       when token usage > 80% of context window
+           │    └──────┬───────┘
+           │           │
+           │    ┌──────▼───────┐
+           │    │   call_llm   │
+           │    └──────┬───────┘
+           │           │
+           │    ┌──────▼──────────────────┐
+           │    │   route_llm_response   │
+           │    └──┬──────────┬───────────┘
+           │  text │    tools │  nudge │  max_iter
+           │       ▼          ▼        ▼
+           │      END  ┌────────────┐  loop back
+           │           │exec_tools  │
+           │           └──────┬─────┘
+           │                  │ need_approval → END
+           └──────────────────┘  otherwise loop back
+"""
+
+from __future__ import annotations
+
+import functools
+from typing import Any, Literal
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.checkpoint.memory import MemorySaver
+
+from titanclaw.config import AgentConfig
+from titanclaw.nodes.router import route_input_node
+from titanclaw.nodes.signals import check_signals_node
+from titanclaw.nodes.llm_call import call_llm_node
+from titanclaw.nodes.tool_exec import execute_tools_node
+from titanclaw.nodes.compaction import ContextCompactor, compact_context_node
+from titanclaw.nodes.context_monitor import ContextMonitor
+from titanclaw.safety.layer import SafetyLayer
+from titanclaw.state import AgentState
+from titanclaw.tools.registry import ToolRegistry
+
+
+# ---------------------------------------------------------------------------
+# Routing helpers (conditional edges)
+# ---------------------------------------------------------------------------
+
+
+def _after_route_input(state: AgentState) -> Literal["check_signals", "__end__"]:
+    """After parsing input: stop if a control command set signal=stop."""
+    if state.signal == "stop":
+        return END
+    return "check_signals"
+
+
+def _after_check_signals(state: AgentState) -> Literal["compact_context", "__end__"]:
+    """After signal check: run compaction gate before every LLM call."""
+    if state.signal == "stop":
+        return END
+    return "compact_context"
+
+
+def _after_compact_context(state: AgentState) -> Literal["call_llm", "__end__"]:
+    """After compaction: proceed to LLM (compaction never stops the loop)."""
+    if state.signal == "stop":
+        return END
+    return "call_llm"
+
+
+def _after_call_llm(
+    state: AgentState,
+    max_iterations: int = 50,
+) -> Literal["check_signals", "execute_tools", "__end__"]:
+    """Route after the LLM call based on response type."""
+    if state.iteration >= max_iterations:
+        return END
+    if state.last_response_type == "text":
+        return END
+    if state.last_response_type == "tool_calls":
+        return "execute_tools"
+    # nudge or none — loop back so check_signals injects the nudge message
+    return "check_signals"
+
+
+def _after_execute_tools(
+    state: AgentState,
+) -> Literal["check_signals", "__end__"]:
+    """After tool execution: loop back unless approval is needed or stopped."""
+    if state.last_response_type == "need_approval":
+        return END
+    if state.signal == "stop":
+        return END
+    return "check_signals"
+
+
+# ---------------------------------------------------------------------------
+# Graph builder
+# ---------------------------------------------------------------------------
+
+
+class AgentDeps:
+    """
+    Runtime dependencies injected into graph nodes.
+
+    Mirrors ``AgentDeps`` from the Rust implementation.  All three
+    execution modes (chat, job, container) share these same deps.
+    """
+
+    def __init__(
+        self,
+        llm: Any,
+        tool_registry: ToolRegistry,
+        safety: SafetyLayer,
+        config: AgentConfig,
+        workspace: Any = None,
+        context_limit: int = 100_000,
+    ) -> None:
+        self.llm = llm
+        self.tool_registry = tool_registry
+        self.safety = safety
+        self.config = config
+        self.workspace = workspace
+        self.context_limit = context_limit
+
+
+def build_agent_graph(deps: AgentDeps) -> Any:
+    """
+    Build and compile the TitanClaw agent StateGraph.
+
+    Returns a compiled LangGraph graph ready to be invoked with::
+
+        graph.ainvoke({"messages": [HumanMessage(content="hello")]},
+                      config={"configurable": {"thread_id": "abc"}})
+
+    The ``MemorySaver`` checkpointer provides per-thread state persistence
+    analogous to the Rust ``SessionManager`` + ``UndoManager``.
+
+    Compaction is transparent to callers: the ``compact_context`` node runs
+    automatically before every LLM call and is a no-op when token usage
+    is below the 80 % threshold.
+    """
+    builder = StateGraph(AgentState)
+
+    # ── Shared compaction objects ──────────────────────────────────────────────
+
+    monitor = ContextMonitor(context_limit=deps.context_limit)
+    compactor = ContextCompactor(llm=deps.llm, workspace=deps.workspace)
+
+    # ── Nodes ────────────────────────────────────────────────────────────────
+
+    builder.add_node("route_input", route_input_node)
+    builder.add_node("check_signals", check_signals_node)
+
+    # Compaction node — runs before every LLM call, no-op when under threshold
+    async def _compact_context(state: AgentState) -> dict[str, Any]:
+        return await compact_context_node(state, compactor, monitor)
+
+    builder.add_node("compact_context", _compact_context)
+
+    # LLM node — partial-apply deps
+    async def _call_llm(state: AgentState) -> dict[str, Any]:
+        return await call_llm_node(state, deps.llm)
+
+    builder.add_node("call_llm", _call_llm)
+
+    # Tool execution node — partial-apply deps
+    async def _execute_tools(state: AgentState) -> dict[str, Any]:
+        return await execute_tools_node(
+            state,
+            deps.tool_registry,
+            deps.safety,
+            auto_approve=deps.config.auto_approve_tools,
+        )
+
+    builder.add_node("execute_tools", _execute_tools)
+
+    # ── Edges ─────────────────────────────────────────────────────────────────
+
+    builder.add_edge(START, "route_input")
+
+    builder.add_conditional_edges(
+        "route_input",
+        _after_route_input,
+        {"check_signals": "check_signals", END: END},
+    )
+
+    builder.add_conditional_edges(
+        "check_signals",
+        _after_check_signals,
+        {"compact_context": "compact_context", END: END},
+    )
+
+    builder.add_conditional_edges(
+        "compact_context",
+        _after_compact_context,
+        {"call_llm": "call_llm", END: END},
+    )
+
+    after_llm = functools.partial(
+        _after_call_llm,
+        max_iterations=deps.config.max_iterations,
+    )
+    builder.add_conditional_edges(
+        "call_llm",
+        after_llm,
+        {
+            "check_signals": "check_signals",
+            "execute_tools": "execute_tools",
+            END: END,
+        },
+    )
+
+    builder.add_conditional_edges(
+        "execute_tools",
+        _after_execute_tools,
+        {"check_signals": "check_signals", END: END},
+    )
+
+    # ── Compile ───────────────────────────────────────────────────────────────
+
+    checkpointer = MemorySaver()
+    return builder.compile(checkpointer=checkpointer)

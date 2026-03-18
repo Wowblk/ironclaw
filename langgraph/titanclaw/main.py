@@ -1,0 +1,162 @@
+"""CLI entry point — mirrors src/main.rs."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import sys
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.logging import RichHandler
+
+from titanclaw.app import TitanclawApp
+from titanclaw.config import Config
+
+app = typer.Typer(
+    name="titanclaw",
+    help="TitanClaw — secure personal AI assistant (LangGraph edition)",
+    no_args_is_help=False,
+)
+console = Console()
+
+
+def _setup_logging(debug: bool = False) -> None:
+    level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(message)s",
+        handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
+    )
+    # Quiet noisy libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+@app.command()
+def run(
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the interactive REPL (default command)."""
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = TitanclawApp(config)
+
+    try:
+        asyncio.run(application.run())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Interrupted.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
+def version():
+    """Print the current version."""
+    from titanclaw import __version__
+    console.print(f"titanclaw {__version__} (LangGraph)")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(None, "--host", "-H", help="Bind host (default: WEB_HOST or 0.0.0.0)"),
+    port: int = typer.Option(None, "--port", "-p", help="Bind port (default: WEB_PORT or 8000)"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the web gateway (browser UI + SSE streaming)."""
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = TitanclawApp(config)
+
+    try:
+        asyncio.run(
+            application.run_web(
+                host=host or None,
+                port=port or None,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
+def telegram(
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the Telegram bot (long-polling mode).
+
+    Requires TELEGRAM_BOT_TOKEN.  Optionally set TELEGRAM_OWNER_ID to
+    restrict the bot to a single Telegram user.
+
+    Install dependency: pip install "titanclaw[telegram]"
+    """
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = TitanclawApp(config)
+
+    try:
+        asyncio.run(application.run_telegram())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Telegram bot stopped.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
+def slack(
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Path to .env file"),
+):
+    """Start the Slack Events API webhook server.
+
+    Requires SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET.
+    Binds to SLACK_WEBHOOK_HOST:SLACK_WEBHOOK_PORT (default 0.0.0.0:3000).
+
+    Point your Slack app Event Subscriptions URL to:
+      https://<your-host>:3000/slack/events
+
+    Install dependency: pip install "titanclaw[slack]"
+    """
+    _setup_logging(debug)
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
+    config = Config.load()
+    application = TitanclawApp(config)
+
+    try:
+        asyncio.run(application.run_slack())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Slack gateway stopped.[/dim]")
+        sys.exit(0)
+
+
+@app.command()
+def config_show():
+    """Show the current configuration."""
+    cfg = Config.load()
+    console.print_json(cfg.model_dump_json(indent=2))
+
+
+if __name__ == "__main__":
+    app()

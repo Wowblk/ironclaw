@@ -1,9 +1,9 @@
 """Tests for builtin tools and the tool registry."""
 
 import pytest
-from ironclaw.tools.registry import ToolRegistry
-from ironclaw.tools.builtin.echo import echo_tool
-from ironclaw.tools.builtin.time_tool import time_tool
+from titanclaw.tools.registry import ToolRegistry
+from titanclaw.tools.builtin.echo import echo_tool
+from titanclaw.tools.builtin.time_tool import time_tool
 
 
 @pytest.mark.asyncio

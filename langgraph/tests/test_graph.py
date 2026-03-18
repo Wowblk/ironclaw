@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ironclaw.config import AgentConfig
-from ironclaw.graph import AgentDeps, build_agent_graph
-from ironclaw.safety.layer import SafetyLayer
-from ironclaw.state import AgentState, ToolDefinition
-from ironclaw.tools.registry import ToolRegistry
-from ironclaw.tools.builtin.echo import echo_tool
+from titanclaw.config import AgentConfig
+from titanclaw.graph import AgentDeps, build_agent_graph
+from titanclaw.safety.layer import SafetyLayer
+from titanclaw.state import AgentState, ToolDefinition
+from titanclaw.tools.registry import ToolRegistry
+from titanclaw.tools.builtin.echo import echo_tool
 
 
 class _MockLLM:

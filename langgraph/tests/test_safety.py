@@ -1,7 +1,7 @@
 """Tests for the safety layer — mirrors Rust safety tests."""
 
 import pytest
-from ironclaw.safety.layer import PolicyAction, SafetyLayer
+from titanclaw.safety.layer import PolicyAction, SafetyLayer
 
 
 def test_injection_detection_blocks():

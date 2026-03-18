@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "ironclaw"
+name = "titanclaw"
 version = "0.1.0"
-description = "IronClaw — secure personal AI assistant, rewritten with LangGraph"
+description = "TitanClaw — secure personal AI assistant, rewritten with LangGraph"
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2",
@@ -45,11 +45,11 @@ dev = [
 ]
 
 [project.scripts]
-ironclaw = "ironclaw.main:app"
+titanclaw = "titanclaw.main:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["ironclaw*"]
+include = ["titanclaw*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

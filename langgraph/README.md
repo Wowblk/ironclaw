@@ -1,6 +1,6 @@
-# IronClaw — LangGraph Edition
+# TitanClaw — LangGraph Edition
 
-A Python reimplementation of [IronClaw](../README.md) using [LangGraph](https://langchain-ai.github.io/langgraph/).
+A Python reimplementation of [TitanClaw](../README.md) using [LangGraph](https://langchain-ai.github.io/langgraph/).
 
 ## Architecture
 
@@ -27,9 +27,9 @@ START → route_input → check_signals → call_llm → [text → END]
 | `LoopOutcome::MaxIterations` | `iteration >= max_iterations` → `END` |
 | `Scheduler` | `JobScheduler` (asyncio tasks) |
 | `SessionManager` | LangGraph `MemorySaver` checkpointer |
-| `SafetyLayer` | `ironclaw.safety.SafetyLayer` |
-| `ToolRegistry` | `ironclaw.tools.ToolRegistry` |
-| `Channel` trait | `ironclaw.channels.Channel` ABC |
+| `SafetyLayer` | `titanclaw.safety.SafetyLayer` |
+| `ToolRegistry` | `titanclaw.tools.ToolRegistry` |
+| `Channel` trait | `titanclaw.channels.Channel` ABC |
 
 ### Graph Topology
 
@@ -72,10 +72,10 @@ export LLM_BACKEND=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Run the REPL
-ironclaw run
+titanclaw run
 
 # Or with debug logging
-ironclaw run --debug
+titanclaw run --debug
 ```
 
 ## Configuration
