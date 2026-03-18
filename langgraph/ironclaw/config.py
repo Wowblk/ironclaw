@@ -105,6 +105,19 @@ class ChannelConfig(BaseSettings):
     web_cors_origins: list[str] = Field(default=["*"], alias="WEB_CORS_ORIGINS")
 
 
+class SupermemoryConfig(BaseSettings):
+    """Supermemory cloud memory configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    api_key: str | None = Field(default=None, alias="SUPERMEMORY_API_KEY")
+    container_tag: str = Field(default="ironclaw", alias="SUPERMEMORY_CONTAINER_TAG")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.api_key)
+
+
 class Config(BaseSettings):
     """Root configuration — composes all subsystem configs."""
 
@@ -121,6 +134,7 @@ class Config(BaseSettings):
     channels: ChannelConfig = Field(default_factory=ChannelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
+    supermemory: SupermemoryConfig = Field(default_factory=SupermemoryConfig)
 
     @classmethod
     def load(cls) -> "Config":
