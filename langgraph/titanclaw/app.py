@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from titanclaw.config import Config
 from titanclaw.graph import AgentDeps, build_agent_graph
+from titanclaw.memory.workspace import Workspace
 from titanclaw.safety.layer import SafetyLayer
 from titanclaw.scheduler.scheduler import JobScheduler
 from titanclaw.state import AgentState, ToolDefinition
@@ -115,7 +116,12 @@ def _tool_defs_from_registry(registry: ToolRegistry) -> list[ToolDefinition]:
     ]
 
 
-async def _run_repl(graph: Any, registry: ToolRegistry, config: Config) -> None:
+async def _run_repl(
+    graph: Any,
+    registry: ToolRegistry,
+    config: Config,
+    system_prompt: str | None = None,
+) -> None:
     """Interactive REPL loop — mirrors src/channels/repl.rs."""
     channel = ReplChannel()
     tool_defs = _tool_defs_from_registry(registry)
@@ -132,6 +138,8 @@ async def _run_repl(graph: Any, registry: ToolRegistry, config: Config) -> None:
             "user_id": msg.user_id,
             "available_tools": tool_defs,
         }
+        if system_prompt:
+            state_input["system_prompt"] = system_prompt
         graph_config = {"configurable": {"thread_id": msg.thread_id}}
 
         try:
@@ -193,10 +201,28 @@ class TitanclawApp:
         self.scheduler = JobScheduler(
             max_parallel_jobs=self.config.agent.max_parallel_jobs
         )
+        self.workspace = Workspace(base_dir=self.config.agent.workspace_dir)
+
+    async def _load_system_prompt(self) -> str | None:
+        """
+        Load identity context from workspace and combine with agent name.
+
+        Mirrors the Rust ``Agent::build_system_prompt`` which calls
+        ``Workspace::identity_context()`` and prepends the agent name.
+        Returns None when no identity files are found.
+        """
+        identity = await self.workspace.load_identity_context()
+        if not identity:
+            return None
+        header = f"You are {self.config.agent.name}.\n\n"
+        return header + identity
 
     async def run(self) -> None:
         """Start the application.  Default mode: interactive REPL."""
-        await _run_repl(self.graph, self.tool_registry, self.config)
+        system_prompt = await self._load_system_prompt()
+        if system_prompt:
+            logger.info("Loaded identity context (%d chars) into system prompt", len(system_prompt))
+        await _run_repl(self.graph, self.tool_registry, self.config, system_prompt=system_prompt)
 
     async def run_web(
         self,
@@ -210,6 +236,7 @@ class TitanclawApp:
         """
         import uvicorn
 
+        system_prompt = await self._load_system_prompt()
         web_cfg = self.config.channels
         resolved_host = host or web_cfg.web_host
         resolved_port = port or web_cfg.web_port
@@ -219,6 +246,7 @@ class TitanclawApp:
             graph=self.graph,
             tool_registry=self.tool_registry,
             cors_origins=resolved_cors,
+            system_prompt=system_prompt,
         )
 
         logger.info(
@@ -244,11 +272,13 @@ class TitanclawApp:
                 "TELEGRAM_BOT_TOKEN is not set.\n"
                 "Get a token from @BotFather and set it in your .env file."
             )
+        system_prompt = await self._load_system_prompt()
         adapter = TelegramAdapter(
             graph=self.graph,
             tool_registry=self.tool_registry,
             bot_token=cfg.bot_token,
             owner_id=cfg.owner_id,
+            system_prompt=system_prompt,
         )
         await adapter.start_polling()
 
@@ -269,11 +299,13 @@ class TitanclawApp:
                 "SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET must both be set.\n"
                 "Find them in your Slack app settings at https://api.slack.com/apps"
             )
+        system_prompt = await self._load_system_prompt()
         adapter = SlackAdapter(
             graph=self.graph,
             tool_registry=self.tool_registry,
             bot_token=cfg.bot_token,
             signing_secret=cfg.signing_secret,
+            system_prompt=system_prompt,
         )
         logger.info(
             "Starting Slack gateway on http://%s:%d/slack/events",

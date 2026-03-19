@@ -180,10 +180,12 @@ class WebGateway:
         graph: Any,
         tool_registry: Any,
         cors_origins: list[str] | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         self._graph = graph
         self._tool_registry = tool_registry
         self._cors_origins = cors_origins or ["*"]
+        self._system_prompt = system_prompt
         self.app = self._build_app()
 
     # ------------------------------------------------------------------
@@ -204,10 +206,12 @@ class WebGateway:
 
     async def _sse_stream(self, content: str, thread_id: str) -> AsyncIterator[str]:
         """Yield SSE-formatted strings by streaming graph events."""
-        state_input = {
+        state_input: dict[str, Any] = {
             "messages": [HumanMessage(content=content)],
             "available_tools": self._tool_defs(),
         }
+        if self._system_prompt:
+            state_input["system_prompt"] = self._system_prompt
         graph_config = {"configurable": {"thread_id": thread_id}}
 
         try:

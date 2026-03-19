@@ -49,6 +49,11 @@ class AgentConfig(BaseSettings):
     max_tool_intent_nudges: int = 2
     # Default timezone
     default_timezone: str = "UTC"
+    # Workspace directory — filesystem backend for persistent memory & identity files.
+    # Defaults to ~/.titanclaw/workspace (mirrors the Rust bootstrap base dir).
+    workspace_dir: str = Field(
+        default_factory=lambda: os.path.expanduser("~/.titanclaw/workspace"),
+    )
 
 
 class SafetyConfig(BaseSettings):

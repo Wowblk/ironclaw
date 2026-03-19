@@ -113,12 +113,14 @@ class SlackAdapter:
         bot_token: str,
         signing_secret: str,
         owner_id: str | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         self._graph = graph
         self._tool_registry = tool_registry
         self._bot_token = bot_token
         self._signing_secret = signing_secret
         self._owner_id = owner_id
+        self._system_prompt = system_prompt
         self._bolt_app = self._build_bolt_app()
 
     # ------------------------------------------------------------------
@@ -139,10 +141,12 @@ class SlackAdapter:
 
     async def _invoke(self, text: str, thread_id: str) -> str:
         """Run the agent graph and return the final text response."""
-        state_input = {
+        state_input: dict[str, Any] = {
             "messages": [HumanMessage(content=text)],
             "available_tools": self._tool_defs(),
         }
+        if self._system_prompt:
+            state_input["system_prompt"] = self._system_prompt
         result = await self._graph.ainvoke(
             state_input,
             config={"configurable": {"thread_id": thread_id}},
