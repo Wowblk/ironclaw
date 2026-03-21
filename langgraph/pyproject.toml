@@ -42,6 +42,10 @@ all-channels = [
     "slack-bolt>=1.21",
     "cryptography>=42",
 ]
+docker-sandbox = []
+wasm-sandbox = [
+    "wasmtime>=25",
+]
 supermemory = [
     "supermemory>=0.1",
 ]

@@ -102,7 +102,51 @@ def _build_tool_registry(config: Config) -> ToolRegistry:
         registry.register(list_dir_tool)
         registry.register(http_get_tool)
         registry.register(http_post_tool)
+        # Register the bare shell tool first; sandboxes may override it below.
         registry.register(shell_tool)
+
+    # --- Docker sandbox ---
+    docker_cfg = config.docker_sandbox
+    if docker_cfg.enabled and config.agent.allow_local_tools:
+        from titanclaw.tools.sandbox.docker_sandbox import DockerSandbox
+        docker_sandbox = DockerSandbox(
+            image=docker_cfg.image,
+            memory_mb=docker_cfg.memory_mb,
+            cpu_quota=docker_cfg.cpu_quota,
+            network_mode=docker_cfg.network_mode,
+            workspace_dir=config.agent.workspace_dir,
+            workspace_writable=docker_cfg.workspace_writable,
+            timeout=docker_cfg.timeout,
+        )
+        # Overrides the bare shell tool registered above.
+        registry.register(docker_sandbox.create_shell_tool())
+        logger.info(
+            "Docker sandbox enabled — shell commands run in %s "
+            "(memory=%dMiB, cpus=%.1f, network=%s)",
+            docker_cfg.image,
+            docker_cfg.memory_mb,
+            docker_cfg.cpu_quota,
+            docker_cfg.network_mode,
+        )
+
+    # --- WASM sandbox ---
+    wasm_cfg = config.wasm_sandbox
+    if wasm_cfg.enabled:
+        from titanclaw.tools.sandbox.wasm_sandbox import WasmSandbox
+        wasm_sandbox = WasmSandbox(
+            tools_dir=wasm_cfg.tools_dir,
+            fuel=wasm_cfg.fuel,
+            workspace_dir=config.agent.workspace_dir,
+            timeout=wasm_cfg.timeout,
+        )
+        wasm_tools = wasm_sandbox.load_tools()
+        for wt in wasm_tools:
+            registry.register(wt)
+        logger.info(
+            "WASM sandbox enabled — loaded %d tool(s) from %s",
+            len(wasm_tools),
+            wasm_cfg.tools_dir,
+        )
 
     return registry
 

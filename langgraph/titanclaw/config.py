@@ -164,6 +164,34 @@ class SupermemoryConfig(BaseSettings):
         return bool(self.api_key)
 
 
+class DockerSandboxConfig(BaseSettings):
+    """Docker-based execution sandbox configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    enabled: bool = Field(default=False, alias="DOCKER_SANDBOX_ENABLED")
+    image: str = Field(default="python:3.12-slim", alias="DOCKER_SANDBOX_IMAGE")
+    memory_mb: int = Field(default=512, alias="DOCKER_SANDBOX_MEMORY_MB")
+    cpu_quota: float = Field(default=1.0, alias="DOCKER_SANDBOX_CPU_QUOTA")
+    network_mode: str = Field(default="none", alias="DOCKER_SANDBOX_NETWORK")
+    workspace_writable: bool = Field(default=False, alias="DOCKER_SANDBOX_WORKSPACE_WRITABLE")
+    timeout: float = Field(default=60.0, alias="DOCKER_SANDBOX_TIMEOUT")
+
+
+class WasmSandboxConfig(BaseSettings):
+    """WASM/WASI tool sandbox configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    enabled: bool = Field(default=False, alias="WASM_SANDBOX_ENABLED")
+    tools_dir: str = Field(
+        default_factory=lambda: os.path.expanduser("~/.titanclaw/wasm-tools"),
+        alias="WASM_TOOLS_DIR",
+    )
+    fuel: int = Field(default=1_000_000_000, alias="WASM_FUEL")
+    timeout: float = Field(default=30.0, alias="WASM_TIMEOUT")
+
+
 class Config(BaseSettings):
     """Root configuration — composes all subsystem configs."""
 
@@ -177,6 +205,8 @@ class Config(BaseSettings):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
+    wasm_sandbox: WasmSandboxConfig = Field(default_factory=WasmSandboxConfig)
     channels: ChannelConfig = Field(default_factory=ChannelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
