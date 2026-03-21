@@ -93,6 +93,47 @@ class SlackConfig(BaseSettings):
     webhook_port: int = Field(default=3000, alias="SLACK_WEBHOOK_PORT")
 
 
+class FeishuConfig(BaseSettings):
+    """Feishu (Lark / 飞书) Events API configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    app_id: str | None = Field(default=None, alias="FEISHU_APP_ID")
+    app_secret: str | None = Field(default=None, alias="FEISHU_APP_SECRET")
+    verification_token: str | None = Field(default=None, alias="FEISHU_VERIFICATION_TOKEN")
+    encrypt_key: str | None = Field(default=None, alias="FEISHU_ENCRYPT_KEY")
+    webhook_host: str = Field(default="0.0.0.0", alias="FEISHU_WEBHOOK_HOST")
+    webhook_port: int = Field(default=8010, alias="FEISHU_WEBHOOK_PORT")
+
+
+class WeComConfig(BaseSettings):
+    """WeCom (企业微信) Callback API configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    corp_id: str | None = Field(default=None, alias="WECOM_CORP_ID")
+    corp_secret: str | None = Field(default=None, alias="WECOM_CORP_SECRET")
+    agent_id: int | None = Field(default=None, alias="WECOM_AGENT_ID")
+    token: str | None = Field(default=None, alias="WECOM_TOKEN")
+    encoding_aes_key: str | None = Field(default=None, alias="WECOM_ENCODING_AES_KEY")
+    webhook_host: str = Field(default="0.0.0.0", alias="WECOM_WEBHOOK_HOST")
+    webhook_port: int = Field(default=8020, alias="WECOM_WEBHOOK_PORT")
+
+
+class QQConfig(BaseSettings):
+    """QQ channel configuration (OneBot v11 HTTP callback)."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    onebot_api_url: str = Field(
+        default="http://localhost:3000", alias="ONEBOT_API_URL"
+    )
+    access_token: str | None = Field(default=None, alias="ONEBOT_ACCESS_TOKEN")
+    self_id: int | None = Field(default=None, alias="ONEBOT_SELF_ID")
+    webhook_host: str = Field(default="0.0.0.0", alias="QQ_WEBHOOK_HOST")
+    webhook_port: int = Field(default=8030, alias="QQ_WEBHOOK_PORT")
+
+
 class ChannelConfig(BaseSettings):
     """Channel enablement flags."""
 
@@ -139,6 +180,9 @@ class Config(BaseSettings):
     channels: ChannelConfig = Field(default_factory=ChannelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
+    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    wecom: WeComConfig = Field(default_factory=WeComConfig)
+    qq: QQConfig = Field(default_factory=QQConfig)
     supermemory: SupermemoryConfig = Field(default_factory=SupermemoryConfig)
 
     @classmethod

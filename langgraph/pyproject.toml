@@ -31,9 +31,16 @@ telegram = [
 slack = [
     "slack-bolt>=1.21",
 ]
+feishu = [
+    "cryptography>=42",
+]
+wecom = [
+    "cryptography>=42",
+]
 all-channels = [
     "python-telegram-bot[asyncio]>=21",
     "slack-bolt>=1.21",
+    "cryptography>=42",
 ]
 supermemory = [
     "supermemory>=0.1",

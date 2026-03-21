@@ -37,6 +37,9 @@ from titanclaw.channels.repl import ReplChannel
 from titanclaw.channels.web import WebGateway
 from titanclaw.channels.telegram import TelegramAdapter
 from titanclaw.channels.slack import SlackAdapter
+from titanclaw.channels.feishu import FeishuAdapter
+from titanclaw.channels.wecom import WeComAdapter
+from titanclaw.channels.qq import QQAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +314,135 @@ class TitanclawApp:
             "Starting Slack gateway on http://%s:%d/slack/events",
             cfg.webhook_host,
             cfg.webhook_port,
+        )
+        server_cfg = uvicorn.Config(
+            adapter.asgi_app,
+            host=cfg.webhook_host,
+            port=cfg.webhook_port,
+            log_level="info",
+        )
+        await uvicorn.Server(server_cfg).serve()
+
+    async def run_feishu(self) -> None:
+        """Start the Feishu (飞书) Events API webhook server.
+
+        Requires ``FEISHU_APP_ID``, ``FEISHU_APP_SECRET``, and
+        ``FEISHU_VERIFICATION_TOKEN``.  Binds to
+        ``FEISHU_WEBHOOK_HOST:FEISHU_WEBHOOK_PORT`` (default 0.0.0.0:8010).
+
+        Set ``FEISHU_ENCRYPT_KEY`` if message encryption is enabled on the
+        app console.  Requires ``pip install "titanclaw[feishu]"`` for
+        encrypted mode.
+        """
+        import uvicorn
+
+        cfg = self.config.feishu
+        if not cfg.app_id or not cfg.app_secret or not cfg.verification_token:
+            raise ValueError(
+                "FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_VERIFICATION_TOKEN "
+                "must all be set.\nGet them from https://open.feishu.cn/app"
+            )
+        system_prompt = await self._load_system_prompt()
+        adapter = FeishuAdapter(
+            graph=self.graph,
+            tool_registry=self.tool_registry,
+            app_id=cfg.app_id,
+            app_secret=cfg.app_secret,
+            verification_token=cfg.verification_token,
+            encrypt_key=cfg.encrypt_key,
+            system_prompt=system_prompt,
+        )
+        logger.info(
+            "Starting Feishu gateway on http://%s:%d/feishu/events",
+            cfg.webhook_host,
+            cfg.webhook_port,
+        )
+        server_cfg = uvicorn.Config(
+            adapter.asgi_app,
+            host=cfg.webhook_host,
+            port=cfg.webhook_port,
+            log_level="info",
+        )
+        await uvicorn.Server(server_cfg).serve()
+
+    async def run_wecom(self) -> None:
+        """Start the WeCom (企业微信) Callback API webhook server.
+
+        Requires ``WECOM_CORP_ID``, ``WECOM_CORP_SECRET``, ``WECOM_AGENT_ID``,
+        ``WECOM_TOKEN``, and ``WECOM_ENCODING_AES_KEY``.  Binds to
+        ``WECOM_WEBHOOK_HOST:WECOM_WEBHOOK_PORT`` (default 0.0.0.0:8020).
+
+        Requires ``pip install "titanclaw[wecom]"`` (for AES decryption).
+        """
+        import uvicorn
+
+        cfg = self.config.wecom
+        if not all([
+            cfg.corp_id, cfg.corp_secret, cfg.agent_id,
+            cfg.token, cfg.encoding_aes_key,
+        ]):
+            raise ValueError(
+                "WECOM_CORP_ID, WECOM_CORP_SECRET, WECOM_AGENT_ID, WECOM_TOKEN, "
+                "and WECOM_ENCODING_AES_KEY must all be set.\n"
+                "Configure them in your WeCom app at https://work.weixin.qq.com"
+            )
+        system_prompt = await self._load_system_prompt()
+        adapter = WeComAdapter(
+            graph=self.graph,
+            tool_registry=self.tool_registry,
+            corp_id=cfg.corp_id,
+            corp_secret=cfg.corp_secret,
+            agent_id=cfg.agent_id,
+            token=cfg.token,
+            encoding_aes_key=cfg.encoding_aes_key,
+            system_prompt=system_prompt,
+        )
+        logger.info(
+            "Starting WeCom gateway on http://%s:%d/wecom/events",
+            cfg.webhook_host,
+            cfg.webhook_port,
+        )
+        server_cfg = uvicorn.Config(
+            adapter.asgi_app,
+            host=cfg.webhook_host,
+            port=cfg.webhook_port,
+            log_level="info",
+        )
+        await uvicorn.Server(server_cfg).serve()
+
+    async def run_qq(self) -> None:
+        """Start the QQ OneBot v11 HTTP callback server.
+
+        Requires a running OneBot v11 implementation (NapCat, LLOneBot, …)
+        configured to push events to::
+
+            http://<this-host>:QQWEBHOOK_PORT/qq/events
+
+        Relevant env vars::
+
+            ONEBOT_API_URL=http://localhost:3000
+            ONEBOT_ACCESS_TOKEN=...   (optional)
+            ONEBOT_SELF_ID=...        (recommended — prevents self-reply loops)
+            QQ_WEBHOOK_HOST=0.0.0.0
+            QQ_WEBHOOK_PORT=8030
+        """
+        import uvicorn
+
+        cfg = self.config.qq
+        system_prompt = await self._load_system_prompt()
+        adapter = QQAdapter(
+            graph=self.graph,
+            tool_registry=self.tool_registry,
+            onebot_api_url=cfg.onebot_api_url,
+            access_token=cfg.access_token,
+            self_id=cfg.self_id,
+            system_prompt=system_prompt,
+        )
+        logger.info(
+            "Starting QQ gateway on http://%s:%d/qq/events (OneBot API: %s)",
+            cfg.webhook_host,
+            cfg.webhook_port,
+            cfg.onebot_api_url,
         )
         server_cfg = uvicorn.Config(
             adapter.asgi_app,
