@@ -87,7 +87,41 @@ def _build_llm(config: Config) -> Any:
     raise ValueError(f"Unknown LLM backend: {backend!r}")
 
 
-def _build_tool_registry(config: Config) -> ToolRegistry:
+def _build_safety_layer(config: Config) -> SafetyLayer:
+    """Instantiate the SafetyLayer from config."""
+    return SafetyLayer(
+        injection_check_enabled=config.safety.injection_check_enabled,
+        max_output_length=config.safety.max_output_length,
+        leak_detection_enabled=config.safety.leak_detection_enabled,
+        leak_action=config.safety.leak_action,
+    )
+
+
+async def _setup_orchestrator(config: Config, llm: Any) -> Any:
+    """Start the orchestrator server if configured; return the instance or None."""
+    if not config.orchestrator.enabled:
+        return None
+    from titanclaw.orchestrator import OrchestratorServer
+    server = OrchestratorServer(llm=llm, bind_host=config.orchestrator.host)
+    await server.start()
+    logger.info("Orchestrator started on port %d", server.port)
+    return server
+
+
+async def _setup_orphan_reaper(config: Config) -> Any:
+    """Start the container orphan reaper if docker sandbox is enabled; return or None."""
+    if not (config.docker_sandbox.enabled and config.reaper.enabled):
+        return None
+    from titanclaw.tools.sandbox.orphan_reaper import ContainerOrphanReaper
+    reaper = ContainerOrphanReaper(
+        interval_secs=config.reaper.interval_secs,
+        threshold_secs=config.reaper.threshold_secs,
+    )
+    await reaper.start()
+    return reaper
+
+
+def _build_tool_registry(config: Config, orchestrator: Any = None) -> ToolRegistry:
     """Register built-in tools.  Mirrors src/tools/builtin/mod.rs."""
     registry = ToolRegistry()
     registry.register(echo_tool)
@@ -127,6 +161,7 @@ def _build_tool_registry(config: Config) -> ToolRegistry:
             workspace_dir=config.agent.workspace_dir,
             allowed_domains=docker_cfg.allowed_domains,
             credential_mappings=docker_cfg.credential_mappings,
+            orchestrator=orchestrator,
             timeout=docker_cfg.timeout,
         )
         # Overrides the bare shell tool registered above.
@@ -249,11 +284,11 @@ class TitanclawApp:
     def __init__(self, config: Config | None = None) -> None:
         self.config = config or Config.load()
         self.llm = _build_llm(self.config)
-        self.tool_registry = _build_tool_registry(self.config)
-        self.safety = SafetyLayer(
-            injection_check_enabled=self.config.safety.injection_check_enabled,
-            max_output_length=self.config.safety.max_output_length,
-        )
+        self.safety = _build_safety_layer(self.config)
+        # orchestrator + reaper are started asynchronously in _async_init()
+        self.orchestrator: Any = None
+        self._reaper: Any = None
+        self.tool_registry = _build_tool_registry(self.config, orchestrator=None)
         self.deps = AgentDeps(
             llm=self.llm,
             tool_registry=self.tool_registry,
@@ -265,6 +300,37 @@ class TitanclawApp:
             max_parallel_jobs=self.config.agent.max_parallel_jobs
         )
         self.workspace = Workspace(base_dir=self.config.agent.workspace_dir)
+
+    async def _async_init(self) -> None:
+        """
+        Start async services (orchestrator, orphan reaper) and rebuild the tool
+        registry with the orchestrator injected.
+
+        Call this once before the first ``run()`` / ``run_web()`` invocation.
+        """
+        self.orchestrator = await _setup_orchestrator(self.config, self.llm)
+        self._reaper = await _setup_orphan_reaper(self.config)
+
+        if self.orchestrator is not None:
+            # Rebuild registry so DockerSandbox gets the live orchestrator instance
+            self.tool_registry = _build_tool_registry(
+                self.config, orchestrator=self.orchestrator
+            )
+            self.deps = AgentDeps(
+                llm=self.llm,
+                tool_registry=self.tool_registry,
+                safety=self.safety,
+                config=self.config.agent,
+            )
+            self.graph = build_agent_graph(self.deps)
+
+    async def _shutdown(self) -> None:
+        """Gracefully stop background services."""
+        if self._reaper is not None:
+            await self._reaper.reap_all()
+            await self._reaper.stop()
+        if self.orchestrator is not None:
+            await self.orchestrator.stop()
 
     async def _load_system_prompt(self) -> str | None:
         """
@@ -282,10 +348,14 @@ class TitanclawApp:
 
     async def run(self) -> None:
         """Start the application.  Default mode: interactive REPL."""
+        await self._async_init()
         system_prompt = await self._load_system_prompt()
         if system_prompt:
             logger.info("Loaded identity context (%d chars) into system prompt", len(system_prompt))
-        await _run_repl(self.graph, self.tool_registry, self.config, system_prompt=system_prompt)
+        try:
+            await _run_repl(self.graph, self.tool_registry, self.config, system_prompt=system_prompt)
+        finally:
+            await self._shutdown()
 
     async def run_web(
         self,

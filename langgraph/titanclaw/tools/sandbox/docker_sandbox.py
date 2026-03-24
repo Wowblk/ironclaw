@@ -158,6 +158,12 @@ class DockerSandbox:
         (``"bearer"`` | ``"header:<name>"`` | ``"query:<param>"``).
         Secrets are resolved from host environment variables and injected
         at the proxy layer — never passed into the container.
+    orchestrator:
+        Optional ``OrchestratorServer`` instance.  When set, every container
+        gets ``ORCHESTRATOR_URL`` and ``ORCHESTRATOR_TOKEN`` env vars so it
+        can call the LLM via the host proxy.
+    session_id:
+        Session identifier used in container labels for the orphan reaper.
     timeout:
         Default command timeout in seconds (default 60).
     extra_caps:
@@ -176,6 +182,8 @@ class DockerSandbox:
         workspace_dir: str | None = None,
         allowed_domains: list[str] | None = None,
         credential_mappings: list[dict[str, str]] | None = None,
+        orchestrator: Any | None = None,
+        session_id: str = "",
         timeout: float = _DEFAULT_TIMEOUT,
         extra_caps: list[str] | None = None,
         extra_docker_args: list[str] | None = None,
@@ -190,9 +198,13 @@ class DockerSandbox:
         )
         self.allowed_domains = allowed_domains or []
         self.credential_mappings = credential_mappings or []
+        self.orchestrator = orchestrator   # OrchestratorServer | None
+        self.session_id = session_id
         self.timeout = timeout
         self.extra_caps = extra_caps or []
         self.extra_docker_args = extra_docker_args or []
+
+        self._job_counter = 0  # monotonic counter for unique job IDs
 
         # Proxy server, started lazily on first call when allowed_domains is set
         self._proxy: Any | None = None          # HttpProxyServer instance
@@ -358,8 +370,16 @@ class DockerSandbox:
 
         mount_mode = "rw" if workspace_writable else "ro"
 
+        # Unique job ID for this execution (used by orphan reaper + orchestrator)
+        self._job_counter += 1
+        job_id = f"tc-{self.session_id or 'anon'}-{self._job_counter}"
+
         args: list[str] = [
             "docker", "run", "--rm",
+            # Sandbox identification labels (used by ContainerOrphanReaper)
+            "--label", "titanclaw.sandbox=true",
+            "--label", f"titanclaw.session={self.session_id or 'unknown'}",
+            "--label", f"titanclaw.job={job_id}",
             # Resource limits
             "--network", actual_network,
             f"--memory={self.memory_mb}m",
@@ -381,6 +401,29 @@ class DockerSandbox:
 
         args += proxy_env
 
+        # Orchestrator injection — container can call the host LLM via HTTP
+        orch_token: str | None = None
+        if self.orchestrator is not None:
+            try:
+                orch_token = await self.orchestrator.token_store.issue(
+                    job_id, session_id=self.session_id
+                )
+                orch_port = self.orchestrator.port
+                args += [
+                    "-e", f"ORCHESTRATOR_URL=http://host-gateway:{orch_port}",
+                    "-e", f"ORCHESTRATOR_TOKEN={orch_token}",
+                ]
+                if "--add-host=host-gateway:host-gateway" not in args:
+                    args += ["--add-host=host-gateway:host-gateway"]
+                # Must use a network that can reach the host
+                if actual_network == "none":
+                    # Upgrade to bridge so orchestrator is reachable
+                    idx = args.index("--network") + 1
+                    args[idx] = "bridge"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to issue orchestrator token: %s", exc)
+                orch_token = None
+
         for cap in self.extra_caps:
             args += ["--cap-add", cap]
 
@@ -392,12 +435,14 @@ class DockerSandbox:
 
         logger.debug("DockerSandbox(%s) run: %s", effective_policy.value, command[:120])
 
+        result: ToolResult | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
+            timed_out = False
             try:
                 stdout, _ = await asyncio.wait_for(
                     proc.communicate(), timeout=effective_timeout
@@ -405,23 +450,26 @@ class DockerSandbox:
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()
-                return ToolResult(
+                timed_out = True
+
+            if timed_out:
+                result = ToolResult(
                     output=f"Command timed out after {effective_timeout}s",
                     duration_ms=(time.monotonic() - start) * 1000,
                     error=True,
                 )
-
-            output = stdout.decode(errors="replace")[:_MAX_OUTPUT_BYTES]
-            duration = (time.monotonic() - start) * 1000
-            exit_code = proc.returncode or 0
-            return ToolResult(
-                output=f"Exit code: {exit_code}\n\n{output}",
-                duration_ms=duration,
-                error=exit_code != 0,
-            )
+            else:
+                output = stdout.decode(errors="replace")[:_MAX_OUTPUT_BYTES]
+                duration = (time.monotonic() - start) * 1000
+                exit_code = proc.returncode or 0
+                result = ToolResult(
+                    output=f"Exit code: {exit_code}\n\n{output}",
+                    duration_ms=duration,
+                    error=exit_code != 0,
+                )
 
         except FileNotFoundError:
-            return ToolResult(
+            result = ToolResult(
                 output=(
                     "docker CLI not found on PATH.  "
                     "Install Docker: https://docs.docker.com/get-docker/"
@@ -430,11 +478,20 @@ class DockerSandbox:
                 error=True,
             )
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(
+            result = ToolResult(
                 output=f"DockerSandbox error: {exc}",
                 duration_ms=0,
                 error=True,
             )
+        finally:
+            # Always revoke the orchestrator token after the job ends
+            if orch_token is not None and self.orchestrator is not None:
+                try:
+                    await self.orchestrator.token_store.revoke(job_id)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        return result or ToolResult(output="Unknown error", duration_ms=0, error=True)
 
     # ------------------------------------------------------------------
     # Tool factory

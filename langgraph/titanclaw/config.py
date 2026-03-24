@@ -57,12 +57,22 @@ class AgentConfig(BaseSettings):
 
 
 class SafetyConfig(BaseSettings):
-    """Safety layer configuration."""
+    """Safety layer configuration.
+
+    Environment variables (prefix SAFETY_)
+    ----------------------------------------
+    SAFETY_INJECTION_CHECK_ENABLED   : bool   — prompt injection detection (default true)
+    SAFETY_MAX_OUTPUT_LENGTH         : int    — max chars in tool output (default 100000)
+    SAFETY_LEAK_DETECTION_ENABLED    : bool   — scan tool output for secrets (default true)
+    SAFETY_LEAK_ACTION               : str    — "redact" | "block" (default "redact")
+    """
 
     model_config = SettingsConfigDict(env_prefix="SAFETY_", extra="ignore")
 
     injection_check_enabled: bool = True
     max_output_length: int = 100_000
+    leak_detection_enabled: bool = True
+    leak_action: str = "redact"   # "redact" | "block"
 
 
 class DatabaseConfig(BaseSettings):
@@ -164,6 +174,42 @@ class SupermemoryConfig(BaseSettings):
         return bool(self.api_key)
 
 
+class OrchestratorConfig(BaseSettings):
+    """Internal orchestrator HTTP API configuration.
+
+    The orchestrator allows sandbox containers to make LLM calls back to the
+    host without holding an API key themselves.  A per-job bearer token is
+    injected as ORCHESTRATOR_TOKEN; the URL as ORCHESTRATOR_URL.
+
+    Environment variables
+    ---------------------
+    ORCHESTRATOR_ENABLED   : bool — start the orchestrator (default false)
+    ORCHESTRATOR_HOST      : str  — bind host (default 127.0.0.1)
+    """
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    enabled: bool = Field(default=False, alias="ORCHESTRATOR_ENABLED")
+    host: str = Field(default="127.0.0.1", alias="ORCHESTRATOR_HOST")
+
+
+class OrphanReaperConfig(BaseSettings):
+    """Container orphan reaper configuration.
+
+    Environment variables
+    ---------------------
+    REAPER_ENABLED        : bool — enable background reaper (default true when docker sandbox on)
+    REAPER_INTERVAL_SECS  : int  — scan interval in seconds (default 300)
+    REAPER_THRESHOLD_SECS : int  — containers older than this are orphans (default 600)
+    """
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    enabled: bool = Field(default=True, alias="REAPER_ENABLED")
+    interval_secs: int = Field(default=300, alias="REAPER_INTERVAL_SECS")
+    threshold_secs: int = Field(default=600, alias="REAPER_THRESHOLD_SECS")
+
+
 class DockerSandboxConfig(BaseSettings):
     """Docker-based execution sandbox configuration.
 
@@ -254,6 +300,8 @@ class Config(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
     wasm_sandbox: WasmSandboxConfig = Field(default_factory=WasmSandboxConfig)
+    orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
+    reaper: OrphanReaperConfig = Field(default_factory=OrphanReaperConfig)
     channels: ChannelConfig = Field(default_factory=ChannelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
