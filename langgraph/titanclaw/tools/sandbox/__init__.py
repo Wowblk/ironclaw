@@ -27,7 +27,14 @@ Usage example::
         registry.register(tool)
 """
 
-from titanclaw.tools.sandbox.docker_sandbox import DockerSandbox
+from titanclaw.tools.sandbox.docker_sandbox import DockerSandbox, SandboxPolicy
+from titanclaw.tools.sandbox.network_proxy import DomainAllowlist, HttpProxyServer
 from titanclaw.tools.sandbox.wasm_sandbox import WasmSandbox
 
-__all__ = ["DockerSandbox", "WasmSandbox"]
+__all__ = [
+    "DockerSandbox",
+    "SandboxPolicy",
+    "DomainAllowlist",
+    "HttpProxyServer",
+    "WasmSandbox",
+]

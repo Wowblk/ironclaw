@@ -165,7 +165,27 @@ class SupermemoryConfig(BaseSettings):
 
 
 class DockerSandboxConfig(BaseSettings):
-    """Docker-based execution sandbox configuration."""
+    """Docker-based execution sandbox configuration.
+
+    Environment variables
+    ---------------------
+    DOCKER_SANDBOX_ENABLED          : bool   — enable the sandbox (default false)
+    DOCKER_SANDBOX_IMAGE            : str    — base image (default python:3.12-slim)
+    DOCKER_SANDBOX_MEMORY_MB        : int    — memory cap in MiB (default 512)
+    DOCKER_SANDBOX_CPU_QUOTA        : float  — fractional CPUs (default 1.0)
+    DOCKER_SANDBOX_POLICY           : str    — read_only | workspace_write | full_access
+    DOCKER_SANDBOX_NETWORK          : str    — docker network mode (default none)
+    DOCKER_SANDBOX_ALLOWED_DOMAINS  : str    — comma-separated domain allowlist
+    DOCKER_SANDBOX_CREDENTIALS      : str    — JSON array of credential mapping dicts
+    DOCKER_SANDBOX_TIMEOUT          : float  — default command timeout seconds (default 60)
+
+    FullAccess double opt-in
+    ------------------------
+    Setting policy=full_access is not sufficient alone.  The container host
+    must also export SANDBOX_ALLOW_FULL_ACCESS=true.  Without it the sandbox
+    downgrades to workspace_write and logs an error.  This mirrors the safety
+    guard in src/sandbox/manager.rs.
+    """
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -173,13 +193,39 @@ class DockerSandboxConfig(BaseSettings):
     image: str = Field(default="python:3.12-slim", alias="DOCKER_SANDBOX_IMAGE")
     memory_mb: int = Field(default=512, alias="DOCKER_SANDBOX_MEMORY_MB")
     cpu_quota: float = Field(default=1.0, alias="DOCKER_SANDBOX_CPU_QUOTA")
+    # "read_only" | "workspace_write" | "full_access"
+    policy: str = Field(default="read_only", alias="DOCKER_SANDBOX_POLICY")
     network_mode: str = Field(default="none", alias="DOCKER_SANDBOX_NETWORK")
-    workspace_writable: bool = Field(default=False, alias="DOCKER_SANDBOX_WORKSPACE_WRITABLE")
+    # Comma-separated list: "pypi.org,*.github.com"
+    allowed_domains_csv: str = Field(default="", alias="DOCKER_SANDBOX_ALLOWED_DOMAINS")
+    # JSON: '[{"host_pattern":"api.openai.com","secret_env_var":"OPENAI_API_KEY","location":"bearer"}]'
+    credentials_json: str = Field(default="[]", alias="DOCKER_SANDBOX_CREDENTIALS")
     timeout: float = Field(default=60.0, alias="DOCKER_SANDBOX_TIMEOUT")
+
+    @property
+    def allowed_domains(self) -> list[str]:
+        return [d.strip() for d in self.allowed_domains_csv.split(",") if d.strip()]
+
+    @property
+    def credential_mappings(self) -> list[dict]:
+        import json as _json
+        try:
+            return _json.loads(self.credentials_json) or []
+        except Exception:  # noqa: BLE001
+            return []
 
 
 class WasmSandboxConfig(BaseSettings):
-    """WASM/WASI tool sandbox configuration."""
+    """WASM/WASI tool sandbox configuration.
+
+    Environment variables
+    ---------------------
+    WASM_SANDBOX_ENABLED  : bool  — enable the sandbox (default false)
+    WASM_TOOLS_DIR        : str   — directory of .wasm tool modules
+    WASM_FUEL             : int   — CPU fuel limit per call (default 1B)
+    WASM_MAX_MEMORY_MB    : int   — linear memory cap in MiB (default 64)
+    WASM_TIMEOUT          : float — wall-clock timeout per call (default 30)
+    """
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -189,6 +235,7 @@ class WasmSandboxConfig(BaseSettings):
         alias="WASM_TOOLS_DIR",
     )
     fuel: int = Field(default=1_000_000_000, alias="WASM_FUEL")
+    max_memory_mb: int = Field(default=64, alias="WASM_MAX_MEMORY_MB")
     timeout: float = Field(default=30.0, alias="WASM_TIMEOUT")
 
 

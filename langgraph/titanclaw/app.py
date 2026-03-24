@@ -108,25 +108,38 @@ def _build_tool_registry(config: Config) -> ToolRegistry:
     # --- Docker sandbox ---
     docker_cfg = config.docker_sandbox
     if docker_cfg.enabled and config.agent.allow_local_tools:
-        from titanclaw.tools.sandbox.docker_sandbox import DockerSandbox
+        from titanclaw.tools.sandbox.docker_sandbox import DockerSandbox, SandboxPolicy
+        try:
+            policy = SandboxPolicy(docker_cfg.policy)
+        except ValueError:
+            logger.warning(
+                "Unknown DOCKER_SANDBOX_POLICY=%r — defaulting to read_only",
+                docker_cfg.policy,
+            )
+            policy = SandboxPolicy.READ_ONLY
+
         docker_sandbox = DockerSandbox(
             image=docker_cfg.image,
             memory_mb=docker_cfg.memory_mb,
             cpu_quota=docker_cfg.cpu_quota,
+            policy=policy,
             network_mode=docker_cfg.network_mode,
             workspace_dir=config.agent.workspace_dir,
-            workspace_writable=docker_cfg.workspace_writable,
+            allowed_domains=docker_cfg.allowed_domains,
+            credential_mappings=docker_cfg.credential_mappings,
             timeout=docker_cfg.timeout,
         )
         # Overrides the bare shell tool registered above.
         registry.register(docker_sandbox.create_shell_tool())
         logger.info(
             "Docker sandbox enabled — shell commands run in %s "
-            "(memory=%dMiB, cpus=%.1f, network=%s)",
+            "(policy=%s, memory=%dMiB, cpus=%.1f, network=%s, allowed_domains=%d)",
             docker_cfg.image,
+            policy.value,
             docker_cfg.memory_mb,
             docker_cfg.cpu_quota,
-            docker_cfg.network_mode,
+            docker_cfg.network_mode if not docker_cfg.allowed_domains else "proxy",
+            len(docker_cfg.allowed_domains),
         )
 
     # --- WASM sandbox ---
@@ -136,6 +149,7 @@ def _build_tool_registry(config: Config) -> ToolRegistry:
         wasm_sandbox = WasmSandbox(
             tools_dir=wasm_cfg.tools_dir,
             fuel=wasm_cfg.fuel,
+            max_memory_mb=wasm_cfg.max_memory_mb,
             workspace_dir=config.agent.workspace_dir,
             timeout=wasm_cfg.timeout,
         )
@@ -143,9 +157,11 @@ def _build_tool_registry(config: Config) -> ToolRegistry:
         for wt in wasm_tools:
             registry.register(wt)
         logger.info(
-            "WASM sandbox enabled — loaded %d tool(s) from %s",
+            "WASM sandbox enabled — loaded %d tool(s) from %s (fuel=%d, max_mem=%dMiB)",
             len(wasm_tools),
             wasm_cfg.tools_dir,
+            wasm_cfg.fuel,
+            wasm_cfg.max_memory_mb,
         )
 
     return registry

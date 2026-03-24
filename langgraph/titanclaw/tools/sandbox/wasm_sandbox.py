@@ -81,9 +81,11 @@ from titanclaw.tools.registry import ToolDefinition, ToolResult
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_FUEL = 1_000_000_000   # ~1 billion instructions
+_DEFAULT_FUEL = 1_000_000_000       # ~1 billion instructions
 _DEFAULT_TOOLS_DIR = "~/.titanclaw/wasm-tools"
-_DEFAULT_TIMEOUT = 30.0         # wall-clock seconds (fuel is the primary CPU guard)
+_DEFAULT_TIMEOUT = 30.0             # wall-clock seconds (fuel is the primary CPU guard)
+_DEFAULT_MAX_MEMORY_MB = 64         # WASM linear memory cap (Rust default is 10 MiB; we allow more)
+_DEFAULT_MAX_TABLE_ELEMENTS = 10_000  # WASM table entries (matches Rust limits.rs)
 _MAX_OUTPUT_BYTES = 100_000
 
 _OPEN_SCHEMA: dict[str, Any] = {
@@ -103,6 +105,12 @@ class WasmSandbox:
     fuel:
         Initial fuel units per call (default 1 billion).  Each WebAssembly
         instruction consumes one unit.  Set to ``0`` to disable fuel metering.
+    max_memory_mb:
+        Maximum WASM linear memory in MiB (default 64).  Memory growth beyond
+        this is denied by the ``WasmResourceLimiter``.
+    max_table_elements:
+        Maximum number of WASM table entries (default 10,000).  Prevents
+        unbounded indirect-call-table growth.
     workspace_dir:
         Host path that is preopened (read-write) inside the sandbox.
         Defaults to ``~/.titanclaw/workspace``.
@@ -115,11 +123,15 @@ class WasmSandbox:
         self,
         tools_dir: str = _DEFAULT_TOOLS_DIR,
         fuel: int = _DEFAULT_FUEL,
+        max_memory_mb: int = _DEFAULT_MAX_MEMORY_MB,
+        max_table_elements: int = _DEFAULT_MAX_TABLE_ELEMENTS,
         workspace_dir: str | None = None,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> None:
         self.tools_dir = str(Path(tools_dir).expanduser().resolve())
         self.fuel = fuel
+        self.max_memory_bytes = max_memory_mb * 1024 * 1024
+        self.max_table_elements = max_table_elements
         self.workspace_dir = str(
             Path(workspace_dir or Path.home() / ".titanclaw" / "workspace").expanduser().resolve()
         )
@@ -127,6 +139,64 @@ class WasmSandbox:
 
         # Lazy-initialised wasmtime Engine (shared, thread-safe)
         self._engine: Any | None = None
+
+    # ------------------------------------------------------------------
+    # Resource limiter
+    # ------------------------------------------------------------------
+
+    def _make_resource_limiter(self) -> Any:
+        """
+        Build a wasmtime ``ResourceLimiter`` that caps linear memory growth
+        and table element growth.
+
+        Mirrors ``WasmResourceLimiter`` in ``src/tools/wasm/limits.rs``.
+
+        The limiter is installed on the ``Store`` via ``store.limiter()``.
+        wasmtime calls ``memory_growing`` / ``table_growing`` before each
+        allocation; returning ``False`` traps the module.
+        """
+        max_bytes = self.max_bytes = self.max_memory_bytes
+        max_table = self.max_table_elements
+
+        try:
+            import wasmtime
+
+            class _Limiter(wasmtime.ResourceLimiter):
+                def memory_growing(
+                    self,
+                    current: int,
+                    desired: int,
+                    maximum: int | None,
+                ) -> bool:
+                    if desired > max_bytes:
+                        logger.debug(
+                            "WASM memory growth denied: %d bytes requested, limit %d bytes",
+                            desired,
+                            max_bytes,
+                        )
+                        return False
+                    return True
+
+                def table_growing(
+                    self,
+                    current: int,
+                    desired: int,
+                    maximum: int | None,
+                ) -> bool:
+                    if desired > max_table:
+                        logger.debug(
+                            "WASM table growth denied: %d elements requested, limit %d",
+                            desired,
+                            max_table,
+                        )
+                        return False
+                    return True
+
+            return _Limiter()
+        except (ImportError, AttributeError):
+            # wasmtime not installed or old version without ResourceLimiter —
+            # fall back gracefully (fuel still provides CPU protection)
+            return None
 
     # ------------------------------------------------------------------
     # wasmtime engine
@@ -200,6 +270,11 @@ class WasmSandbox:
             store.set_wasi(wasi_cfg)
             if self.fuel > 0:
                 store.add_fuel(self.fuel)
+
+            # Attach resource limiter (memory + table caps)
+            limiter = self._make_resource_limiter()
+            if limiter is not None:
+                store.limiter(limiter)
 
             # Compile and instantiate
             linker = wasmtime.Linker(engine)
